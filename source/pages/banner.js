@@ -1,10 +1,14 @@
 import React from 'react';
-import {Box, Text, useInput} from 'ink';
+import {Box, Text, useInput, useApp} from 'ink';
 import pageStore from '../store.js';
 
 export default function BannerPage() {
+	const {exit} = useApp();
+
 	useInput((input) => {
-		if (input !== '') {
+		if (input === 'q') {
+			exit();
+		} else {
 			pageStore.setState({ currentPage: 'main' });
 		}
 	});

@@ -1,13 +1,14 @@
 import React, {useState, useEffect} from 'react';
-import {Text, Box, useInput, useApp} from 'ink'; // 引入 useApp
+import {Text, Box, useApp} from 'ink'; // 引入 useApp
 import MainPage from './pages/main.js';
 import BannerPage from './pages/banner.js';
+import AddServerPage from './pages/add_server.js';
 import PageStore from './store.js';
 
 const PAGE_MAP = {
 	main: MainPage,
 	banner: BannerPage,
-
+	add_server: AddServerPage,
 };
 
 export default function App() {
@@ -38,29 +39,13 @@ export default function App() {
 		};
 	}, []);
 
-	useInput((input, key) => {
-		if (input === 'q') { 
-			exit(); 
-		}
-		if (key.tab) {
-			const pages = Object.keys(PAGE_MAP);
-			const currentIndex = pages.indexOf(PageStore.getState().currentPage);
-			const nextIndex = (currentIndex + 1) % pages.length;
-			PageStore.setState({ currentPage: pages[nextIndex] });
-		}
-	});
-
 	const CurrentPageComponent = PAGE_MAP[currentPage];
 
 	return (
 		<Box
 			flexDirection="column"
-			borderStyle="round"
-			borderColor="green"
 			width={width}
 			height={height}
-			justifyContent="center"
-			alignItems="center"
 		>
 			{CurrentPageComponent && <CurrentPageComponent />}
 		</Box>
