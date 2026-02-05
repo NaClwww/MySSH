@@ -1,29 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput, useFocus, useFocusManager, useApp } from 'ink';
-import PageStore from '../store.js';
-import SSHSession from '../utils/ssh.js';
+import { Box, Text, useInput, useApp } from 'ink';
+import PageStore from '../../store.js';
+import SSHSession from '../../utils/ssh.js';
 
 export default function MainPage() {
     const { exit } = useApp();
-    const { focus, enableFocus, disableFocus } = useFocusManager();
     const [activeZone, setActiveZone] = useState('sidebar'); // 'sidebar' | 'content'
-
-    // Disable focus management (Tab cycling) when in content mode (SSH session)
-    useEffect(() => {
-        if (activeZone === 'content') {
-            disableFocus();
-        } else {
-            enableFocus();
-        }
-    }, [activeZone, enableFocus, disableFocus]);
     
     // 记录 Sidebar 当前选中到了第几个
     const [sidebarIndex, setSidebarIndex] = useState(0);
-
-    // 初始聚焦
-    useEffect(() => {
-        focus(`sidebar-${sidebarIndex}`);
-    }, []);
     
     // 多会话管理 (Moved to Store)
     const sessions = PageStore((state) => state.sessions);
@@ -36,6 +21,7 @@ export default function MainPage() {
     const servers = PageStore((state) => state.servers);
     const setCurrentPage = PageStore((state) => state.setCurrentPage);
     const removeServer = PageStore((state) => state.removeServer);
+    const setEditingServerId = PageStore((state) => state.setEditingServerId);
     const sidebarCount = servers.length + 1; 
 
     // Helper: 关闭指定 Session
@@ -52,12 +38,10 @@ export default function MainPage() {
                  const nextIndex = Math.max(0, currentIndex - 1);
                  const nextSession = newSessions[nextIndex];
                  setActiveSessionId(nextSession.id);
-                 setTimeout(() => focus(`session-${nextSession.id}`), 10);
             } else {
                  // 没标签了，回首页
                  setActiveSessionId(null);
                  setActiveZone('sidebar');
-                 focus(`sidebar-${sidebarIndex}`);
             }
         }
     };
@@ -68,9 +52,16 @@ export default function MainPage() {
         // ===========================
         if (activeZone === 'sidebar') {
             // 允许退出应用 (Ctrl+C 或 q)
-            if ((key.ctrl && input === 'c') || input === 'q') {
+            if ((key.ctrl && input === 'c') || input === 'q' || input === 'Q' || key.escape) {
                 closeAllSessions();
                 exit();
+                return;
+            }
+
+            if (key.ctrl && key.rightArrow){
+                if (sessions.length > 0) {
+                    setActiveZone('content');
+                }
                 return;
             }
 
@@ -82,7 +73,6 @@ export default function MainPage() {
                     // 删完后向上移动
                     const newIndex = Math.max(0, sidebarIndex - 1);
                     setSidebarIndex(newIndex);
-                    setTimeout(() => focus(`sidebar-${newIndex}`), 10);
                 }
                 return;
             }
@@ -108,7 +98,16 @@ export default function MainPage() {
                     addSession(newSession);
                     
                     setActiveZone('content');
-                    setTimeout(() => focus(`session-${newSessionId}`), 10);
+                }
+                return;
+            }
+
+            // Edit Server (e)
+            if ((input === 'e' || input === 'E') && sidebarIndex > 0) {
+                const s = servers[sidebarIndex - 1];
+                if (s) {
+                    setEditingServerId(s.id);
+                    setCurrentPage('edit_server');
                 }
                 return;
             }
@@ -116,12 +115,10 @@ export default function MainPage() {
             if (key.downArrow) {
                 const nextIndex = Math.min(sidebarIndex + 1, sidebarCount - 1);
                 setSidebarIndex(nextIndex);
-                focus(`sidebar-${nextIndex}`); 
             }
             if (key.upArrow) {
                 const prevIndex = Math.max(sidebarIndex - 1, 0);
                 setSidebarIndex(prevIndex);
-                focus(`sidebar-${prevIndex}`); 
             }
         }
 
@@ -132,19 +129,11 @@ export default function MainPage() {
             // 返回列表: 使用 Ctrl+Q，避免占用 SSH 的 Esc
             if ((key.ctrl && input === 'q')) {
                 setActiveZone('sidebar');
-                focus(`sidebar-${sidebarIndex}`);
                 return;
             }
             
             // --- Tab 切换 ---
             if (sessions.length > 1) {
-                // Ctrl+Left / Ctrl+Right 切换 Tab
-                // 注意：在某些终端，Ctrl+Arrow 可能只发送 escape 序列，需要自行测试
-                // 这里暂时用 PageUp/PageDown 或者 Shift+Arrow? Ink 的 key.pageUp 不一定准
-                // 让我们尝试用 Tab (Ctrl+Tab 难捕获，这里用 Tab 键切换，但在 Shell 里 Tab 是有用的)
-                // 妥协：使用 Ctrl+N (Next) / Ctrl+P (Prev) 或者 F1/F2
-                // 实际上，为了方便，这里假设用户不想在 SSH 里用 Ctrl+Left/Right
-                
                 // 查找当前 index
                 const currentIndex = sessions.findIndex(s => s.id === activeSessionId);
                 
@@ -152,30 +141,19 @@ export default function MainPage() {
                      const nextIndex = (currentIndex + 1) % sessions.length;
                      const nextId = sessions[nextIndex].id;
                      setActiveSessionId(nextId);
-                     focus(`session-${nextId}`);
                      return;
                 }
                 if (key.ctrl && key.leftArrow) {
                      const prevIndex = (currentIndex - 1 + sessions.length) % sessions.length;
                      const prevId = sessions[prevIndex].id;
                      setActiveSessionId(prevId);
-                     focus(`session-${prevId}`);
                      return;
                 }
-                
-                // // 关闭当前标签: Ctrl+W
-                // if (key.ctrl && input === 'w') {
-                //     if (activeSessionId) {
-                //         closeSession(activeSessionId);
-                //     }
-                //     return;
-                // }
             }
             
             // 如果所有的 Session 都关了
             if (sessions.length === 0 && activeZone === 'content') {
                  setActiveZone('sidebar');
-                 focus(`sidebar-${sidebarIndex}`);
             }
         }
     });
@@ -185,9 +163,9 @@ export default function MainPage() {
             {/* --- Left Sidebar --- */}
             <Box flexDirection="column" borderStyle="round" borderColor={activeZone === 'sidebar' ? "blue" : "gray"} width="25%" height="100%">
                 <Text bold color={activeZone === 'sidebar' ? "blue" : "gray" }>SSH Servers</Text>
-				<FocusServer key="add-btn" id="sidebar-0" label="+ Add Server" isActiveZone={activeZone === 'sidebar'} isSpecial />
+				<FocusServer key="add-btn" label="+ Add Server" isActiveZone={activeZone === 'sidebar'} isSpecial isSelected={sidebarIndex === 0} />
                 {servers.map((server, i) => (
-                    <FocusServer key={server.id} id={`sidebar-${i + 1}`} label={server.name} isActiveZone={activeZone === 'sidebar'} />
+                    <FocusServer key={server.id} label={server.name} isActiveZone={activeZone === 'sidebar'} isSelected={sidebarIndex === i + 1} />
                 ))}
             </Box>
 
@@ -234,7 +212,6 @@ export default function MainPage() {
                         flexGrow={1}
                     >
                          <ShellWindow 
-                             id={`session-${s.id}`}
                              sessionId={s.id}
                              server={s.server}
                              isActiveZone={activeZone === 'content'}
@@ -249,8 +226,8 @@ export default function MainPage() {
 }
 
 // === Sidebar Item ===
-const FocusServer = ({ id, label, isActiveZone, isSpecial }) => {
-    const { isFocused } = useFocus({ id, isActive: isActiveZone });
+const FocusServer = ({ label, isActiveZone, isSpecial, isSelected }) => {
+    const isFocused = isSelected;
     return (
         <Box
             borderStyle={isFocused ? 'double' : 'round'}
@@ -267,10 +244,8 @@ const FocusServer = ({ id, label, isActiveZone, isSpecial }) => {
 };
 
 // === Active Shell Window ===
-const ShellWindow = ({ id, sessionId, isActiveZone, server, isCurrentTab, onClose }) => {
-    // 只有当 tab 也是当前 tab 时，我们才真的去 check focus
-    // 否则后台 tab 不应该抢 focus logic
-    const { isFocused } = useFocus({ id, autoFocus: isCurrentTab, isActive: isActiveZone });
+const ShellWindow = ({ sessionId, isActiveZone, server, isCurrentTab, onClose }) => {
+    const isFocused = isCurrentTab && isActiveZone;
 
     return (
         <Box 

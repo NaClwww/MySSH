@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text, useInput, useStdout } from 'ink';
+import { Box, Text, useStdout, useStdin, useInput } from 'ink';
 import { Client } from 'ssh2';
 import xtermHeadless from '@xterm/headless';
 import fs from 'node:fs';
@@ -53,7 +53,7 @@ export default function SSHSession({ sessionId, server, isFocused, onDisconnect 
         if (sessionObj.context && sessionObj.context.ssh) {
             if (status !== 'connected') setStatus('connected');
             return;
-        }
+        }getTermSize
 
         // --- Start New Connection ---
         setStatus('connecting');
@@ -147,9 +147,19 @@ export default function SSHSession({ sessionId, server, isFocused, onDisconnect 
             // Get visible lines from buffer
             const buffer = term.buffer.active;
             const lines = [];
+            // Fix: Standard loop to avoid infinite loops and maintain layout
             for (let i = 0; i < term.rows; i++) {
                 const line = buffer.getLine(buffer.baseY + i);
-                lines.push(line ? line.translateToString(true) : '');
+                if (line) {
+                    const text = line.translateToString(true);
+                    if (text.trim() === '') {
+                        lines.push(' ');
+                    } else {
+                        lines.push(text);
+                    }
+                } else {
+                    lines.push(' ');
+                }
             }
             setTermLines(lines);
             setCursor({ x: buffer.cursorX, y: buffer.cursorY });
@@ -159,54 +169,58 @@ export default function SSHSession({ sessionId, server, isFocused, onDisconnect 
         updateUI();
         
         // Listener for new data to trigger re-render
-        // Debounce/Throttle could be added here for performance
-        const onData = () => {
-            // Use timeout to allow xterm to process the write first (queued in microtask?)
-            // Actually, since the 'write' listener was added first (in Effect 1), 
-            // it runs first synchronously. So state should be ready.
-            // But React state Update might trigger too often.
-            // setImmediate or setTimeout(..., 0) helps.
-            setTimeout(updateUI, 0);
+        // Throttle UI updates to avoid freezing (Main Thread Blocking) on fast output
+        let updateTimer = null;
+        const scheduleUpdate = () => {
+            if (!updateTimer) {
+                updateTimer = setTimeout(() => {
+                    updateUI();
+                    updateTimer = null;
+                }, 16); 
+            }
         };
         
-        stream.on('data', onData);
+        stream.on('data', scheduleUpdate);
         
+        // Also listen to cursor moves directly from xterm
+        // This ensures cursor updates are captured even if data processing is batched
+        const cursorDisposable = term.onCursorMove ? term.onCursorMove(scheduleUpdate) : { dispose: () => {} };
+
         return () => {
-            stream.removeListener('data', onData);
+            stream.removeListener('data', scheduleUpdate);
+            cursorDisposable.dispose();
+            if (updateTimer) clearTimeout(updateTimer);
         };
     }, [status, sessionObj, dims]); // Re-run if status matches or sessionObj reference updates (it shouldn't drastically)
 
-    // Effect 3: User Input
-    useInput((input, key) => {
+    // Effect 3: User Input (Raw Mode)
+    const { stdin, setRawMode } = useStdin();
+
+    useEffect(() => {
         if (!isFocused || status !== 'connected' || !sessionObj?.context) return;
-        
+
         const { stream } = sessionObj.context;
+        if (setRawMode) setRawMode(true);
+
+        const onData = (data) => {
+            stream.write(data);
+        };
+
+        stdin.on('data', onData);
+        return () => {
+            stdin.off('data', onData);
+        };
+    }, [isFocused, status, sessionObj, stdin, setRawMode]);
+
+    // Handle input when not connected (Error/Connecting state)
+    useInput((input, key) => {
+        if (!isFocused) return;
         
-        if (key.return) {
-            stream.write('\r');
-        } else if (key.backspace) {
-             stream.write('\b');
-        } else if (key.delete) {
-             stream.write('\x7F');
-        } else if (key.escape) {
-             stream.write('\x1B');
-        } else if (key.upArrow) {
-             stream.write('\x1B[A');
-        } else if (key.downArrow) {
-             stream.write('\x1B[B');
-        } else if (key.leftArrow) {
-             stream.write('\x1B[D');
-        } else if (key.rightArrow) {
-             stream.write('\x1B[C');
-        } else if (key.ctrl) {
-            if (input.length === 1) {
-                const charCode = input.toUpperCase().charCodeAt(0);
-                if (charCode >= 64 && charCode <= 95) {
-                    stream.write(String.fromCharCode(charCode - 64));
-                }
+        // If not connected (e.g. error), allow Ctrl+C to close
+        if (status == 'error') {
+            if ((key.ctrl && input === 'c')) {
+                if (onDisconnect) onDisconnect();
             }
-        } else {
-             stream.write(input);
         }
     });
 
@@ -241,6 +255,9 @@ export default function SSHSession({ sessionId, server, isFocused, onDisconnect 
         <Box flexDirection="column" padding={1}>
             <Text>Status: {status}</Text>
             {logs.map((l, i) => <Text key={i} color="gray">{l}</Text>)}
+            {status === 'error' && (
+                <Text dimColor>Press Ctrl+C to close this session.</Text>
+            )}
         </Box>
     );
 }

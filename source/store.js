@@ -20,6 +20,15 @@ const PageStore = create((set, get) => ({
     });
   },
   
+  // 编辑服务器
+  updateServer: (id, updatedData) => {
+    set((state) => {
+        const newServers = state.servers.map(s => s.id === id ? { ...s, ...updatedData } : s);
+        config.set('servers', newServers);
+        return { servers: newServers };
+    });
+  },
+
   // 删除服务器 (顺便加上这个实用的功能)
   removeServer: (id) => {
     set((state) => {
@@ -33,6 +42,10 @@ const PageStore = create((set, get) => ({
   setCurrentPage: (page) => {
     set({ currentPage: page });
   },
+  
+  // 编辑中的 Server ID
+  editingServerId: null,
+  setEditingServerId: (id) => set({ editingServerId: id }),
 
   // === 会话状态管理 (内存中) ===
   sessions: [],

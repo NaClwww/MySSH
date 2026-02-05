@@ -1,14 +1,15 @@
-import React, {useState, useEffect} from 'react';
-import {Text, Box, useApp} from 'ink'; // 引入 useApp
-import MainPage from './pages/main.js';
+import React, {useState, useEffect, useId} from 'react';
+import {Text, Box, useApp, useInput} from 'ink'; // 引入 useApp
+import MainPage from './pages/sshPage/main.js';
 import BannerPage from './pages/banner.js';
-import AddServerPage from './pages/add_server.js';
+import AddServerPage, { EditServerPage } from './pages/sshPage/edit_server.js';
 import PageStore from './store.js';
 
 const PAGE_MAP = {
 	main: MainPage,
 	banner: BannerPage,
 	add_server: AddServerPage,
+    edit_server: EditServerPage,
 };
 
 export default function App() {
@@ -38,6 +39,11 @@ export default function App() {
 			process.stdout.write('\x1b[?1049l');
 		};
 	}, []);
+	useInput((input, key) => {
+		if (key.escape) {
+			return;
+		}
+	});
 
 	const CurrentPageComponent = PAGE_MAP[currentPage];
 
